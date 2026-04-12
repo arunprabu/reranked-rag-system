@@ -1,41 +1,18 @@
 import os
-from typing import TypedDict, List
 
 import cohere
 from dotenv import load_dotenv
-from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 
 from src.api.v1.schema.query_schema import AIResponse
-from src.api.v1.tools.tools import vector_search
+from src.api.v1.tools.tools import RAGState, vector_search_node
 
 load_dotenv(override=True)
 
 
-# ── 1. State ───────────────────────────────────────────────────────────────────
-# The state is the shared data that flows through the entire graph.
-# Each node reads from state and returns updated state.
-
-class RAGState(TypedDict):
-    query: str
-    retrieved_docs: List[Document]   # Output of Node 1 — wide retrieval (k=10)
-    reranked_docs: List[Document]    # Output of Node 2 — narrowed by reranker (top_n=3)
-    response: dict                   # Output of Node 3 — final structured answer
-
-
-# ── 2. Node 1: Vector Search ───────────────────────────────────────────────────
-# Uses a bi-encoder (Google Gemini embeddings) to find semantically similar chunks.
-# We retrieve k=10 to cast a wide net — the reranker will narrow this down.
-
-def vector_search_node(state: RAGState) -> RAGState:
-    docs = vector_search(state["query"], k=10)
-    print(f"[vector_search_node] Retrieved {len(docs)} chunks from PGVector")
-    return {**state, "retrieved_docs": docs}
-
-
-# ── 3. Node 2: Rerank ──────────────────────────────────────────────────────────
+# ── 1. Node 2: Rerank ──────────────────────────────────────────────────────────
 # Uses Cohere's cross-encoder reranker.
 # Unlike bi-encoders (which embed query and doc separately),
 # a cross-encoder sees query + doc TOGETHER → more accurate relevance scoring.
@@ -48,7 +25,7 @@ def rerank_node(state: RAGState) -> RAGState:
         model="rerank-english-v3.0",
         query=state["query"],
         documents=[doc.page_content for doc in docs],
-        top_n=3
+        top_n=10
     )
 
     # Map Cohere result indices back to LangChain Document objects
@@ -73,19 +50,15 @@ def generate_answer_node(state: RAGState) -> RAGState:
     structured_llm = llm.with_structured_output(AIResponse)
 
     context = "\n\n".join([
-        f"[Source: {doc.metadata.get('document_name', doc.metadata.get('source', 'unknown'))} | Page: {doc.metadata.get('page_label', doc.metadata.get('page', '?'))}]\n{doc.page_content}"
+        f"[Source: {doc.metadata.get('source', 'unknown')} | Page: {doc.metadata.get('page', -1) + 1 if doc.metadata.get('page') is not None else '?'}]\n{doc.page_content}"
         for doc in state["reranked_docs"]
     ])
 
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
-            "You are a helpful HR assistant. Answer the user's question directly and clearly "
-            "using only the information in the context below. "
-            "Never mention 'the context', 'the provided text', 'the document', or any internal source references in your answer — "
-            "just answer as if you know the information. "
-            "If the information is not available, say 'I don't have that information at the moment.' "
-            "Always cite the source document and page number at the end."
+            "You are a helpful assistant. Answer the user's question using only the "
+            "provided context. Be precise and always cite the source document and page number."
         ),
         ("human", "Context:\n{context}\n\nQuestion: {query}")
     ])
