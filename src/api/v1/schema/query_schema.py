@@ -16,6 +16,7 @@ class QueryResponse(BaseModel):
 class AIResponse(BaseModel):
     query: str = Field(description="The Given query by user must be present here")
     answer: str = Field(description="The generated response")
-    policy_citations: str = Field(description="Give the Policy Citation")
+    policy_citations: str = Field(description="Give the Policy Citation (for document queries)")
     page_no: str = Field(description="The page number in the metadata")
     document_name: str = Field(description="Name of the document used")
+    sql_query_executed: Optional[str] = Field(default=None, description="The SQL query executed (for product/database queries)")

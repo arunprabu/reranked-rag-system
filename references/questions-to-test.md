@@ -45,6 +45,61 @@
 
 ---
 
+## 🛒 Product Queries (NL2SQL — `products` + `categories`)
+
+- What are the top 5 most expensive products?
+- Show me all Electronics products under $100
+- List all products in the Sports & Outdoors category
+- Which products are currently out of stock or inactive?
+- Give me details of the wireless headphones
+- What is the price of the LEGO Technic Bugatti Chiron?
+- Show me all books and their prices
+- Which products have a stock quantity below 50?
+- List all products in the Clothing category
+- What are the cheapest products available?
+- Show me all Health & Beauty products
+- Which is the most affordable item in the Electronics category?
+- List all Home & Kitchen products priced above $100
+- What products are available in the Toys & Games category?
+- Show me all products with "organic" in the name
+
+---
+
+## 📦 Order Queries (NL2SQL — `orders` + `order_items`)
+
+- How many orders are in shipped status?
+- List all delivered orders
+- Which orders are still pending?
+- What is the total revenue from all delivered orders?
+- Show me orders placed in the last 7 days
+- Which customer placed the highest value order?
+- How many orders have been cancelled?
+- List all confirmed orders with their total amounts
+- What is the average order value?
+- How many orders are there per status?
+- Which customer ordered the most recently?
+- Show me all orders above $300
+- What is the total number of orders placed?
+- List orders placed in the last 30 days
+- Which orders contain Electronics products?
+
+---
+
+## 🔗 Cross-Table Product + Order Queries (NL2SQL — joins)
+
+- Which products have been ordered the most?
+- What is the total quantity sold for each product?
+- Which category generates the most revenue?
+- Show me the top 3 best-selling products by quantity
+- What products did Alice Johnson order?
+- Which customers ordered books?
+- What is the total sales revenue by category?
+- How many units of headphones have been sold across all orders?
+- Which products have never been ordered?
+- Show me all products ordered by customers with delivered status
+
+---
+
 ## ⚠️ Ambiguous Queries
 
 - What is the leave policy?
