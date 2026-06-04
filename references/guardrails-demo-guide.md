@@ -7,9 +7,8 @@
 > 2. **Toxicity checker** — `ToxicLanguage` (input guard)
 > 3. **Topic restriction** — `RestrictToTopic` (input guard)
 >
-> This is the implementation that actually ships on the `guardrail` branch. For the
-> broader, design-level treatment (Presidio, NeMo, RAIL, compliance mapping) see the
-> companion `guardrails-setup.md`.
+> This is the implementation that actually ships on the `guardrail` branch — three
+> focused, working guardrails rather than a broad design survey.
 
 ---
 
