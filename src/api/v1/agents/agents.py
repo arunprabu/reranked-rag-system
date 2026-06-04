@@ -1,16 +1,13 @@
 import os
-from typing import Literal
 import json
 import cohere
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
-from pydantic import BaseModel
 
 from src.api.v1.schema.query_schema import AIResponse
 from src.api.v1.tools.tools import RAGState, vector_search_node
-from src.core.db import get_sql_database
 
 load_dotenv(override=True)
 
@@ -24,150 +21,7 @@ def _get_llm() -> ChatOpenAI:
     )
 
 
-# ── Node 0: Router ────────────────────────────────────────────────────────────
-# Uses Gemini (structured output) to classify the user's query.
-#
-# "product" → query is about products, prices, stock, orders, categories
-#             → routes to nl2sql_node (PostgreSQL / agentic_rag_db)
-# "document" → query is about policies, procedures, text documents
-#             → routes to the RAG pipeline (vector_search → rerank → generate_answer)
-
-class _RouteDecision(BaseModel):
-    route: Literal["product", "document"]
-    reason: str
-
-
-def router_node(state: RAGState) -> RAGState:
-    llm = _get_llm()
-    structured_llm = llm.with_structured_output(_RouteDecision)
-
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a query router for an agentic RAG system.
-            Classify the user's query into EXACTLY one of two routes:
-
-            "product"  — the query asks about products, product prices, stock/inventory,
-                        product categories, customer orders, order items, or anything
-                        answerable from a structured e-commerce database with tables:
-                        products, categories, orders, order_items.
-
-            "document" — the query asks about policies, procedures, guidelines,
-                        regulations, or any topic that requires reading text documents.
-
-            Reply with the route and a one-sentence reason."""
-        ),
-        ("human", "Query: {query}")
-    ])
-
-    chain = prompt | structured_llm
-    decision = chain.invoke({"query": state["query"]})
-    print(f"[router_node] Route → '{decision.route}' | Reason: {decision.reason}")
-    return {**state, "route": decision.route}
-
-
-# ── Node NL2SQL: Translate query to SQL → Execute → Summarise ─────────────────
-# Step 1  create_sql_query_chain generates a safe SELECT statement using the
-#          live DB schema (table/column names + 2 sample rows per table).
-# Step 2  SQLDatabase.run() executes the SQL on the read-only rag_readonly user.
-#          Even if the LLM hallucinated a DML statement, the DB role blocks it.
-# Step 3  Gemini summarises the raw results as a structured AIResponse.
-
-def nl2sql_node(state: RAGState) -> RAGState:
-    llm = _get_llm()
-    db = get_sql_database()
-
-    # ── Step 1: Generate SQL using Gemini + live schema ─────────────────────
-    schema_info = db.get_table_info()
-
-    sql_prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a PostgreSQL expert. Given the database schema below, 
-            write a single valid SELECT query that answers the user's question.
-
-            Rules:
-            - Return ONLY the raw SQL — no explanation, no markdown fences, no backticks.
-            - Use only the tables and columns present in the schema.
-            - Do NOT generate INSERT, UPDATE, DELETE, DROP, or any DML/DDL statements.
-            - Always add a LIMIT clause (max 50 rows) unless the question asks for aggregates.
-            - For product or text searches: NEVER search for the full multi-word phrase as one
-            ILIKE pattern. Instead, split the search into individual meaningful keywords
-            and OR them together across both name and description columns.
-            Example — user asks "wireless headset":
-                WHERE (name ILIKE '%wireless%' OR description ILIKE '%wireless%')
-                OR (name ILIKE '%headset%'  OR description ILIKE '%headset%')
-                OR (name ILIKE '%headphones%' OR description ILIKE '%headphones%')
-            Use your knowledge of synonyms (headset/headphones, laptop/notebook, etc.)
-            to cast a wider net when the exact term may not match.
-
-            Database schema:
-            {schema}"""
-        ),
-        ("human", "Question: {question}")
-    ])
-
-    sql_chain = sql_prompt | llm
-    raw_sql = sql_chain.invoke({
-        "schema": schema_info,
-        "question": state["query"]
-    })
-    # Gemini may return content as a list of parts or a plain string
-    content = raw_sql.content
-    if isinstance(content, list):
-        content = "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p)
-            for p in content
-        )
-    generated_sql = content.strip().strip("```").strip()
-    if generated_sql.lower().startswith("sql"):
-        generated_sql = generated_sql[3:].strip()
-    print(f"[nl2sql_node] Generated SQL:\n{generated_sql}")
-
-    # ── Step 2: Execute SQL ──────────────────────────────────────────────────
-    try:
-        sql_result: str = db.run(generated_sql)
-    except Exception as exc:
-        sql_result = f"SQL execution error: {exc}"
-    print(f"[nl2sql_node] Raw result (truncated): {str(sql_result)[:200]}")
-
-    # ── Step 3: Summarise into AIResponse ────────────────────────────────────
-    structured_llm = llm.with_structured_output(AIResponse)
-    answer_prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            "You are a helpful data analyst. Answer the user's question using "
-            "the SQL query results below. Be concise and format numbers/lists clearly. "
-            "Set policy_citations to empty string, "
-            "page_no to 'N/A', and document_name to 'agentic_rag_db'."
-        ),
-        (
-            "human",
-            "Question: {query}\n\n"
-            "SQL Used:\n{sql}\n\n"
-            "Query Results:\n{result}"
-        )
-    ])
-
-    chain = answer_prompt | structured_llm
-    answer = chain.invoke({
-        "query": state["query"],
-        "sql": generated_sql,
-        "result": sql_result
-    })
-    print("[nl2sql_node] Answer generated.")
-    response = answer.model_dump()
-    response["policy_citations"] = "N/A"
-    response["sql_query_executed"] = generated_sql
-    return {
-        **state,
-        "generated_sql": generated_sql,
-        "sql_result": str(sql_result),
-        "response": response
-    }
-
-
-# ── Node 2: Rerank ──────────────────────────────────────────────────────────────
+# ── Node 1: Rerank ──────────────────────────────────────────────────────────────
 # Uses Cohere's cross-encoder reranker.
 # Unlike bi-encoders (which embed query and doc separately),
 # a cross-encoder sees query + doc TOGETHER → more accurate relevance scoring.
@@ -193,8 +47,8 @@ def rerank_node(state: RAGState) -> RAGState:
     return {**state, "reranked_docs": reranked_docs}
 
 
-# ── Node 3: Generate Answer ─────────────────────────────────────────────────
-# Formats the top 10 reranked chunks as context and calls Gemini LLM.
+# ── Node 2: Generate Answer ─────────────────────────────────────────────────
+# Formats the top 10 reranked chunks as context and calls the LLM.
 # Uses structured output to enforce the AIResponse schema.
 
 def generate_answer_node(state: RAGState) -> RAGState:
@@ -236,33 +90,18 @@ def generate_answer_node(state: RAGState) -> RAGState:
 
 
 # ── Build the LangGraph ────────────────────────────────────────────────────────
-# The graph now has two paths selected by the router:
+# Linear document-RAG pipeline:
 #
-#   router ──► "product"  ──► nl2sql_node ──► END
-#          └─► "document" ──► vector_search ──► rerank ──► generate_answer ──► END
+#   vector_search ──► rerank ──► generate_answer ──► END
 
 def build_rag_graph():
     graph = StateGraph(RAGState)
 
-    graph.add_node("router", router_node)
-    graph.add_node("nl2sql", nl2sql_node)
     graph.add_node("vector_search", vector_search_node)
     graph.add_node("rerank", rerank_node)
     graph.add_node("generate_answer", generate_answer_node)
 
-    graph.set_entry_point("router")
-
-    # Conditional routing: "product" → nl2sql, "document" → vector_search
-    graph.add_conditional_edges(
-        "router",
-        lambda state: state["route"],
-        {
-            "product": "nl2sql",
-            "document": "vector_search",
-        }
-    )
-
-    graph.add_edge("nl2sql", END)
+    graph.set_entry_point("vector_search")
 
     graph.add_edge("vector_search", "rerank")
     graph.add_edge("rerank", "generate_answer")
@@ -289,9 +128,6 @@ def run_search_agent(query: str) -> dict:
         "retrieved_docs": [],
         "reranked_docs": [],
         "response": {},
-        "route": "",
-        "generated_sql": "",
-        "sql_result": "",
     }
     final_state = rag_graph.invoke(initial_state)
     return final_state["response"]
@@ -304,18 +140,15 @@ async def run_search_agent_stream(query: str):
         "retrieved_docs": [],
         "reranked_docs": [],
         "response": {},
-        "route": "",
-        "generated_sql": "",
-        "sql_result": "",
     }
     async for event in rag_graph.astream_events(initial_state, version="v1"):
         kind = event["event"]
-        
+
         # If it's a token generated by the chat model
         if kind == "on_chat_model_stream":
             content = event["data"]["chunk"].content
             if content:
                 # Format as an SSE data stream payload
                 yield f"data: {json.dumps({'token': content})}\n\n"
-                
+
     yield "data: [DONE]\n\n"
