@@ -37,14 +37,14 @@
 
 A production banking RAG system exposes users to serious risks without guardrails:
 
-| Risk | Example | Guardrail Solution |
-|---|---|---|
-| PII leakage | LLM outputs Aadhaar numbers from retrieved chunks | Presidio redaction on output |
-| Prompt injection | User embeds instructions to ignore CIBIL rules | Input toxicity + jailbreak detection |
-| Hallucination | LLM invents loan interest rates not in documents | Provenance / factuality validators |
-| Financial misguidance | LLM advises illegal tax evasion | Topic control + content policy |
-| Regulatory breach | System retains query logs beyond RBI data-retention limit | Audit policies + data minimization |
-| Bias | LLM gives different credit advice based on inferred gender | Bias detection validators |
+| Risk                  | Example                                                    | Guardrail Solution                   |
+| --------------------- | ---------------------------------------------------------- | ------------------------------------ |
+| PII leakage           | LLM outputs Aadhaar numbers from retrieved chunks          | Presidio redaction on output         |
+| Prompt injection      | User embeds instructions to ignore CIBIL rules             | Input toxicity + jailbreak detection |
+| Hallucination         | LLM invents loan interest rates not in documents           | Provenance / factuality validators   |
+| Financial misguidance | LLM advises illegal tax evasion                            | Topic control + content policy       |
+| Regulatory breach     | System retains query logs beyond RBI data-retention limit  | Audit policies + data minimization   |
+| Bias                  | LLM gives different credit advice based on inferred gender | Bias detection validators            |
 
 Guardrails are **not optional** in financial AI — they are the primary control layer between an LLM and regulated end-users.
 
@@ -91,16 +91,16 @@ User Query
 
 ## 3. Technology Stack
 
-| Component | Library | Purpose |
-|---|---|---|
-| Input/Output validation | `guardrails-ai` (v0.6+) | Primary guard framework with Hub validators |
+| Component                 | Library                                    | Purpose                                           |
+| ------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| Input/Output validation   | `guardrails-ai` (v0.6+)                    | Primary guard framework with Hub validators       |
 | PII detection & redaction | `presidio-analyzer`, `presidio-anonymizer` | Detect and redact Aadhaar, PAN, phone, email etc. |
-| Dialog / topic control | `nemoguardrails` | Topical rails, jailbreak Colang flows |
-| Bias detection | `guardrails-ai` BiasCheck validator | Fair lending compliance |
-| Hallucination grounding | `guardrails-ai` ProvenanceLLM validator | Factual grounding with RAG context |
-| Toxicity | `guardrails-ai` ToxicLanguage validator | Input + output moderation |
-| Audit logging | Python `logging` + PostgreSQL | Regulatory audit trail |
-| Confidence scoring | Custom LangChain node | Uncertainty quantification |
+| Dialog / topic control    | `nemoguardrails`                           | Topical rails, jailbreak Colang flows             |
+| Bias detection            | `guardrails-ai` BiasCheck validator        | Fair lending compliance                           |
+| Hallucination grounding   | `guardrails-ai` ProvenanceLLM validator    | Factual grounding with RAG context                |
+| Toxicity                  | `guardrails-ai` ToxicLanguage validator    | Input + output moderation                         |
+| Audit logging             | Python `logging` + PostgreSQL              | Regulatory audit trail                            |
+| Confidence scoring        | Custom LangChain node                      | Uncertainty quantification                        |
 
 ---
 
@@ -111,16 +111,16 @@ Ensure your `.env.example` (copy to `.env`) has these variables:
 ```
 # Existing variables
 COHERE_API_KEY=your_cohere_key
-GOOGLE_API_KEY=your_google_key
-GOOGLE_EMBEDDING_MODEL="gemini-embedding-2-preview"
-GOOGLE_LLM_MODEL=gemini-2.0-flash
+OPENAI_API_KEY=your_google_key
+OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+OPENAI_CHAT_MODEL="gpt-5.4"
 SQLALCHEMY_DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/pgvector_db
 AGENTIC_RAG_DB_URL=postgresql+psycopg://rag_readonly:pass@localhost:5432/agentic_rag_db
 
 # Guardrails AI (get free key from https://guardrailsai.com/hub)
 GUARDRAILS_API_KEY=your_guardrails_hub_key
 
-# NeMo Guardrails (optional NVIDIA endpoint; uses Google LLM as fallback)
+# NeMo Guardrails (optional NVIDIA endpoint; uses OpenAI LLM as fallback)
 NVIDIA_API_KEY=your_nvidia_key_optional
 
 # Audit log level: DEBUG | INFO | WARNING
@@ -179,6 +179,7 @@ guardrails configure
 ```
 
 The CLI will ask:
+
 1. **Enable metrics reporting?** → Type `n` (banking data must not leave your environment)
 2. **Use remote hosted inference?** → Type `n` for production; `y` is acceptable for training labs
 3. **Enter your API key** → Paste the key from `https://guardrailsai.com/hub`
@@ -955,8 +956,8 @@ def compute_llm_confidence(query: str, answer: str) -> float:
     Returns a float 0.0–1.0.
     """
     llm = ChatGoogleGenerativeAI(
-        model=os.getenv("GOOGLE_LLM_MODEL"),
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+        model=os.getenv("OPENAI_CHAT_MODEL"),
+        google_api_key=os.getenv("OPENAI_API_KEY")
     )
     prompt = ChatPromptTemplate.from_messages([
         ("system",
@@ -1119,28 +1120,28 @@ The following framework implements the six pillars of Responsible AI for this sy
 
 ### 15.1 Fairness
 
-| Control | Implementation | File |
-|---|---|---|
-| Bias detection on output | BiasCheck validator + demographic proxy rules | `src/guardrails/bias_guard.py` |
-| Equal credit opportunity language | NoCIBILScoreAdvice custom validator | `src/guardrails/custom_validators.py` |
-| Equitable responses | ProvenanceLLM ensures answers are document-grounded, not stereotype-driven | `src/guardrails/output_guard.py` |
+| Control                           | Implementation                                                             | File                                  |
+| --------------------------------- | -------------------------------------------------------------------------- | ------------------------------------- |
+| Bias detection on output          | BiasCheck validator + demographic proxy rules                              | `src/guardrails/bias_guard.py`        |
+| Equal credit opportunity language | NoCIBILScoreAdvice custom validator                                        | `src/guardrails/custom_validators.py` |
+| Equitable responses               | ProvenanceLLM ensures answers are document-grounded, not stereotype-driven | `src/guardrails/output_guard.py`      |
 
 ### 15.2 Reliability and Safety
 
-| Control | Implementation |
-|---|---|
-| Hallucination detection | Provenance score + LLM confidence scoring |
-| Factual grounding | ProvenanceLLM validator with RAG context |
-| Confidence thresholds | Responses with score < 0.5 include explicit uncertainty statement |
+| Control                 | Implementation                                                    |
+| ----------------------- | ----------------------------------------------------------------- |
+| Hallucination detection | Provenance score + LLM confidence scoring                         |
+| Factual grounding       | ProvenanceLLM validator with RAG context                          |
+| Confidence thresholds   | Responses with score < 0.5 include explicit uncertainty statement |
 
 ### 15.3 Privacy and Security
 
-| Control | Implementation |
-|---|---|
+| Control                 | Implementation                                   |
+| ----------------------- | ------------------------------------------------ |
 | PII redaction in output | Presidio anonymizer with Indian banking entities |
-| PII blocking in input | Aadhaar / PAN input rejection |
-| API key detection | SecretsPresent validator |
-| Query hashing in logs | SHA-256 hash stored instead of raw query |
+| PII blocking in input   | Aadhaar / PAN input rejection                    |
+| API key detection       | SecretsPresent validator                         |
+| Query hashing in logs   | SHA-256 hash stored instead of raw query         |
 
 ### 15.4 Inclusivity
 
@@ -1197,16 +1198,16 @@ def escalate_to_human(query: str, reason: str) -> dict:
 
 ## Step 16 — Regulatory Compliance Mapping (GDPR, CCPA, RBI)
 
-| Regulation | Requirement | Guardrail Implementation |
-|---|---|---|
-| **GDPR Art. 5(1)(c)** | Data minimisation | Presidio redacts PII; query hashes stored instead of raw queries |
-| **GDPR Art. 22** | Right not to be subject to solely automated decisions | HITL escalation for low-confidence answers |
-| **GDPR Art. 17** | Right to erasure | Audit logs use query hashes — no raw personal data stored |
-| **CCPA § 1798.100** | Right to know what personal data is collected | Audit log schema documented; no query content stored |
-| **RBI IT Framework Ch. 6** | Audit trails for all system activities | `audit_logger.py` — ISO-8601 structured JSON events |
-| **RBI IT Framework Ch. 9** | Incident response and rollback | See rollback procedure below |
-| **RBI Master Circular on Fair Practices** | No biased lending advice | BiasCheck + demographic proxy validation |
-| **SEBI / IRDAI Guidelines** | Financial advice disclaimers | NoCIBILScoreAdvice + NoInterestRatePromise validators |
+| Regulation                                | Requirement                                           | Guardrail Implementation                                         |
+| ----------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
+| **GDPR Art. 5(1)(c)**                     | Data minimisation                                     | Presidio redacts PII; query hashes stored instead of raw queries |
+| **GDPR Art. 22**                          | Right not to be subject to solely automated decisions | HITL escalation for low-confidence answers                       |
+| **GDPR Art. 17**                          | Right to erasure                                      | Audit logs use query hashes — no raw personal data stored        |
+| **CCPA § 1798.100**                       | Right to know what personal data is collected         | Audit log schema documented; no query content stored             |
+| **RBI IT Framework Ch. 6**                | Audit trails for all system activities                | `audit_logger.py` — ISO-8601 structured JSON events              |
+| **RBI IT Framework Ch. 9**                | Incident response and rollback                        | See rollback procedure below                                     |
+| **RBI Master Circular on Fair Practices** | No biased lending advice                              | BiasCheck + demographic proxy validation                         |
+| **SEBI / IRDAI Guidelines**               | Financial advice disclaimers                          | NoCIBILScoreAdvice + NoInterestRatePromise validators            |
 
 ### RBI Incident Response Procedure
 
@@ -1316,17 +1317,17 @@ pytest tests/test_guardrails.py -v
 
 ## Troubleshooting
 
-| Problem | Cause | Fix |
-|---|---|---|
-| `guardrails hub install` fails | Missing API key | Run `guardrails configure` with a valid Hub key |
-| `spacy` model not found | `en_core_web_lg` not downloaded | Run `python -m spacy download en_core_web_lg` |
-| `ModuleNotFoundError: nemoguardrails` | NeMo not installed | Run `pip install nemoguardrails` |
-| `AnalyzerEngine` raises `ModelError` | spaCy model not loaded | Ensure `en_core_web_lg` is installed in the active virtualenv |
-| `ProvenanceLlm` validator is slow | LLM call per output | Use `on_fail="noop"` during development, `"fix"` in production |
-| `BiasCheck` gives false positives | Threshold too low | Increase `threshold` from 0.7 to 0.85 in `output_guard.py` |
-| NeMo rails timeout | LLM latency | Set `timeout: 30` in `config.yml` under `models` |
-| Audit logs not appearing | Log level too high | Set `GUARDRAIL_AUDIT_LOG_LEVEL=DEBUG` in `.env` |
+| Problem                               | Cause                           | Fix                                                            |
+| ------------------------------------- | ------------------------------- | -------------------------------------------------------------- |
+| `guardrails hub install` fails        | Missing API key                 | Run `guardrails configure` with a valid Hub key                |
+| `spacy` model not found               | `en_core_web_lg` not downloaded | Run `python -m spacy download en_core_web_lg`                  |
+| `ModuleNotFoundError: nemoguardrails` | NeMo not installed              | Run `pip install nemoguardrails`                               |
+| `AnalyzerEngine` raises `ModelError`  | spaCy model not loaded          | Ensure `en_core_web_lg` is installed in the active virtualenv  |
+| `ProvenanceLlm` validator is slow     | LLM call per output             | Use `on_fail="noop"` during development, `"fix"` in production |
+| `BiasCheck` gives false positives     | Threshold too low               | Increase `threshold` from 0.7 to 0.85 in `output_guard.py`     |
+| NeMo rails timeout                    | LLM latency                     | Set `timeout: 30` in `config.yml` under `models`               |
+| Audit logs not appearing              | Log level too high              | Set `GUARDRAIL_AUDIT_LOG_LEVEL=DEBUG` in `.env`                |
 
 ---
 
-*Last updated: April 2026 | Tools: guardrails-ai 0.6+, presidio 2.2+, nemoguardrails 0.13+, spaCy 3.7+*
+_Last updated: April 2026 | Tools: guardrails-ai 0.6+, presidio 2.2+, nemoguardrails 0.13+, spaCy 3.7+_

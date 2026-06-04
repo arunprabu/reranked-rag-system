@@ -19,7 +19,6 @@ import os
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader,UnstructuredWordDocumentLoader,PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from src.core.db import get_vector_store
 from sqlalchemy import create_engine, text
 
@@ -59,7 +58,6 @@ def ingest_pdf(file_path):
             "category": "hr_support_desk",
             "last_updated":os.path.getmtime(file_path)
         })
-    print("Sample Document: "+str(docs[0]))
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size = 500,
@@ -69,19 +67,15 @@ def ingest_pdf(file_path):
     chunks = splitter.split_documents(docs)
     print("Chunks: "+str(len(chunks)))
 
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model = os.getenv("GOOGLE_EMBEDDING_MODEL"),
-        api_key = os.getenv("GOOGLE_API_KEY")
-    )
-
-    # embeddings = OpenAIEmbeddings(
-    #     model = os.getenv("OPENAI_EMBEDDING_MODEL"),
-    #     api_key = os.getenv("OPENAI_API_KEY")
-    # )
     vector_store = get_vector_store("RerankingRAGVectorStore")
     vector_store.add_documents(chunks)
     index_add()
     print("==== Ingestion completed ====")
 
-# ingest_pdf("data/HR_Knowledge_Base_2025.pdf")
-# ingest_pdf("data/HR_Knowledge_Base_2026.pdf")
+
+if __name__ == "__main__":
+    # ingest_pdf("data/HR_Knowledge_Base_2025.pdf")
+    ingest_pdf("data/HR_Knowledge_Base_2026.pdf")
+
+
+

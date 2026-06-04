@@ -182,7 +182,7 @@ privileges: SELECT only on all tables in agentic_rag_db
 | ----------------- | -------------------------- |
 | Python            | 3.13+                      |
 | PostgreSQL        | 14+                        |
-| Google AI API key | Gemini models enabled      |
+| OpenAI AI API key | Gemini models enabled      |
 | Cohere API key    | rerank-english-v3.0 access |
 
 ---
@@ -234,9 +234,9 @@ Your `.env` should contain:
 ```dotenv
 # LLM and Embeddings
 COHERE_API_KEY=<your_cohere_key>
-GOOGLE_API_KEY=<your_google_key>
-GOOGLE_EMBEDDING_MODEL=gemini-embedding-2-preview
-GOOGLE_LLM_MODEL=gemini-2.0-flash
+OPENAI_API_KEY=<your_google_key>
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_CHAT_MODEL=gpt-5.4
 
 # PGVector store — for document embeddings (RAG path)
 SQLALCHEMY_DATABASE_URL=postgresql+psycopg://your_user:your_password@localhost:5432/your_pgvector_db

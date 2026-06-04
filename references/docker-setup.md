@@ -22,9 +22,9 @@ Using the structure from `.env.example`:
 
 ```env
 COHERE_API_KEY=your_cohere_key
-GOOGLE_API_KEY=your_google_key
-GOOGLE_EMBEDDING_MODEL="gemini-embedding-2-preview"
-GOOGLE_LLM_MODEL=gemini-3.1-pro-preview
+OPENAI_API_KEY=your_google_key
+OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+OPENAI_CHAT_MODEL=gpt-5.4
 
 # Updated to use Docker network service names
 SQLALCHEMY_DATABASE_URL=postgresql+psycopg://your_user:your_password@pgvector_db:5432/your_pgvector_db

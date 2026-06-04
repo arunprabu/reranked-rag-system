@@ -1,21 +1,20 @@
 import os
 from dotenv import load_dotenv
 from langchain_postgres import PGVector
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.utilities import SQLDatabase
 
 
 load_dotenv(override=True)
-model = os.getenv("GOOGLE_EMBEDDING_MODEL")
-api_key = os.getenv("GOOGLE_API_KEY")
+model = os.getenv("OPENAI_EMBEDDING_MODEL")
+api_key = os.getenv("OPENAI_API_KEY")
 pg_connection = os.getenv("SQLALCHEMY_DATABASE_URL")
 
 
 def get_embeddings():
-    return GoogleGenerativeAIEmbeddings(
+    return OpenAIEmbeddings(
         model=model,
-        api_key=api_key,
-        output_dimensionality=1536
+        api_key=api_key
     )
 
 

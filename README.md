@@ -5,7 +5,7 @@ A LangGraph-powered agentic RAG system that intelligently routes queries between
 - **Document route** — hybrid vector + full-text search over PDF documents, reranked with Cohere, answered by Gemini
 - **Product route** — NL2SQL over a PostgreSQL e-commerce database using Gemini to generate and execute safe SELECT queries
 
-Built with FastAPI, LangGraph, LangChain, PGVector, and Google Gemini.
+Built with FastAPI, LangGraph, LangChain, PGVector, and OpenAI API
 
 ---
 
@@ -31,7 +31,7 @@ router_node  (Gemini structured output)
 - Python 3.13+
 - PostgreSQL with the `pgvector` extension (for document embeddings)
 - A separate PostgreSQL database seeded from `sql/seed.sql` (for product/order data)
-- API keys: Google Gemini, Cohere
+- API keys: Gpt 5.4, Cohere
 
 ---
 
@@ -51,14 +51,14 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-| Variable                  | Purpose                                     |
-| ------------------------- | ------------------------------------------- |
-| `GOOGLE_API_KEY`          | Gemini LLM & embeddings                     |
-| `GOOGLE_LLM_MODEL`        | Gemini model name (e.g. `gemini-2.0-flash`) |
-| `GOOGLE_EMBEDDING_MODEL`  | Embedding model name                        |
-| `COHERE_API_KEY`          | Cohere reranker                             |
-| `SQLALCHEMY_DATABASE_URL` | PGVector store (document embeddings)        |
-| `AGENTIC_RAG_DB_URL`      | E-commerce DB for NL2SQL queries            |
+| Variable                  | Purpose                              |
+| ------------------------- | ------------------------------------ |
+| `OPENAI_API_KEY`          | Gemini LLM & embeddings              |
+| `OPENAI_CHAT_MODEL`       | OpenAI model name (e.g. `gpt-5.4`)   |
+| `OPENAI_EMBEDDING_MODEL`  | Embedding model name                 |
+| `COHERE_API_KEY`          | Cohere reranker                      |
+| `SQLALCHEMY_DATABASE_URL` | PGVector store (document embeddings) |
+| `AGENTIC_RAG_DB_URL`      | E-commerce DB for NL2SQL queries     |
 
 ### 3. Seed the e-commerce database
 

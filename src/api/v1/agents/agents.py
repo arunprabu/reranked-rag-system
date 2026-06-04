@@ -4,8 +4,7 @@ import json
 import cohere
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.runnables.graph import MermaidDrawMethod
+from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel
 
@@ -16,12 +15,12 @@ from src.core.db import get_sql_database
 load_dotenv(override=True)
 
 
-# ── Helper: build the Gemini LLM ──────────────────────────────────────────────
+# ── Helper: build the OpenAI LLM ──────────────────────────────────────────────
 
-def _get_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model=os.getenv("GOOGLE_LLM_MODEL"),
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+def _get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=os.getenv("OPENAI_CHAT_MODEL"),
+        api_key=os.getenv("OPENAI_API_KEY")
     )
 
 
@@ -195,7 +194,7 @@ def rerank_node(state: RAGState) -> RAGState:
 
 
 # ── Node 3: Generate Answer ─────────────────────────────────────────────────
-# Formats the top 3 reranked chunks as context and calls Gemini LLM.
+# Formats the top 10 reranked chunks as context and calls Gemini LLM.
 # Uses structured output to enforce the AIResponse schema.
 
 def generate_answer_node(state: RAGState) -> RAGState:
@@ -211,7 +210,20 @@ def generate_answer_node(state: RAGState) -> RAGState:
         (
             "system",
             "You are a helpful assistant. Answer the user's question using only the "
-            "provided context. Be precise and always cite the source document and page number."
+            "provided context.\n\n"
+            "IMPORTANT: The context may contain chunks from MULTIPLE versions of the same "
+            "document (e.g. a 2025 edition and a 2026 edition). When the answer differs "
+            "across versions, do NOT pick only one. Instead:\n"
+            "  - Lead with the most recent / current version's answer (highest year).\n"
+            "  - Then explicitly note how earlier versions differed "
+            "(e.g. 'As of the 2026 policy ...; previously, under the 2025 policy ...').\n"
+            "  - If all versions agree, just give the single answer.\n\n"
+            "Citation rules (fill the structured fields):\n"
+            "  - document_name: comma-separated list of EVERY source document you used.\n"
+            "  - page_no: comma-separated page numbers, aligned with the documents above.\n"
+            "  - policy_citations: a readable citation combining each document and its page "
+            "(e.g. 'HR_Knowledge_Base_2026.pdf, Page 1; HR_Knowledge_Base_2025.pdf, Page 1').\n"
+            "Always cite ALL versions you drew the answer from, not just one."
         ),
         ("human", "Context:\n{context}\n\nQuestion: {query}")
     ])
