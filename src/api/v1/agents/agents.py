@@ -9,8 +9,6 @@ from langgraph.graph import StateGraph, END
 from src.api.v1.schema.query_schema import AIResponse
 from src.api.v1.tools.tools import RAGState, vector_search_node
 
-load_dotenv(override=True)
-
 
 # ── Helper: build the OpenAI LLM ──────────────────────────────────────────────
 
@@ -31,7 +29,7 @@ def rerank_node(state: RAGState) -> RAGState:
     docs = state["retrieved_docs"]
 
     rerank_response = co.rerank(
-        model="rerank-english-v3.0",
+        model="rerank-v3.5",
         query=state["query"],
         documents=[doc.page_content for doc in docs],
         top_n=10

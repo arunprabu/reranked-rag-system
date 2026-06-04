@@ -23,8 +23,8 @@ from src.core.db import get_vector_store
 from sqlalchemy import create_engine, text
 
 
-load_dotenv(override=True)
-PG_CONNECTION = os.getenv("SQLALCHEMY_DATABASE_URL")
+load_dotenv()
+PG_CONNECTION = os.getenv("PG_CONNECTION_STRING")
 
 def load_document(file_path):
     ext = os.path.splitext(file_path)[-1].lower()
@@ -39,7 +39,7 @@ def load_document(file_path):
     return loader.load(),ext
 
 def index_add():
-    engine = create_engine(os.getenv("SQLALCHEMY_DATABASE_URL"))
+    engine = create_engine(os.getenv("PG_CONNECTION_STRING"))
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE langchain_pg_embedding ALTER COLUMN embedding TYPE vector(1536)"))
         conn.execute(text("CREATE INDEX ON langchain_pg_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"))

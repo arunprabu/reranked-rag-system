@@ -3,11 +3,11 @@ from dotenv import load_dotenv
 from langchain_postgres import PGVector
 from langchain_openai import OpenAIEmbeddings
 
+load_dotenv()
 
-load_dotenv(override=True)
 model = os.getenv("OPENAI_EMBEDDING_MODEL")
 api_key = os.getenv("OPENAI_API_KEY")
-pg_connection = os.getenv("SQLALCHEMY_DATABASE_URL")
+pg_connection = os.getenv("PG_CONNECTION_STRING")
 
 
 def get_embeddings():
