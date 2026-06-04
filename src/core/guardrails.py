@@ -15,9 +15,16 @@ Install the validators once before running the app:
     guardrails hub install hub://guardrails/toxic_language
     guardrails hub install hub://guardrails/restrict_to_topic
 
+Alternatively, set GUARDRAILS_API_KEY in .env and the app will configure the Hub
+token for you on first use (see _ensure_guardrails_configured below).
+
 See references/guardrails-demo-guide.md for the full walkthrough.
 """
 import os
+import uuid
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # The ValidationError import path has shifted across guardrails versions — be
 # defensive so this module imports cleanly regardless of the installed version.
@@ -74,7 +81,44 @@ class GuardrailViolation(Exception):
 _guards = None
 
 
+def _ensure_guardrails_configured() -> None:
+    """Configure the Guardrails Hub token from the GUARDRAILS_API_KEY env var.
+
+    This lets you set the token in `.env` instead of running `guardrails
+    configure` interactively. If `~/.guardrailsrc` already exists (e.g. you ran
+    `guardrails configure`), it is left untouched.
+
+    Set `GUARDRAILS_USE_REMOTE_INFERENCING=true` to run the validators on
+    Guardrails' hosted endpoint (no local model downloads) — this is the path
+    that actually needs the token at runtime.
+    """
+    api_key = os.getenv("GUARDRAILS_API_KEY")
+    if not api_key:
+        return
+
+    # Expose the token to any guardrails code path that reads it from the env.
+    os.environ.setdefault("GUARDRAILS_TOKEN", api_key)
+
+    rc_path = os.path.expanduser("~/.guardrailsrc")
+    if os.path.exists(rc_path):
+        return
+
+    use_remote = os.getenv("GUARDRAILS_USE_REMOTE_INFERENCING", "false")
+    try:
+        with open(rc_path, "w") as rc_file:
+            rc_file.write(
+                f"id={uuid.uuid4()}\n"
+                f"token={api_key}\n"
+                "enable_metrics=false\n"
+                f"use_remote_inferencing={use_remote}\n"
+            )
+    except OSError:
+        # Non-fatal: fall back to any existing guardrails configuration.
+        pass
+
+
 def _build_guards() -> dict:
+    _ensure_guardrails_configured()
     try:
         from guardrails import Guard
         from guardrails.hub import DetectPII, ToxicLanguage, RestrictToTopic

@@ -117,6 +117,25 @@ Answer the prompts:
 
 The token is saved to `~/.guardrailsrc` (not in the repo).
 
+### Option B — configure from `.env`
+
+Instead of running `guardrails configure`, put the token in `.env`:
+
+```dotenv
+GUARDRAILS_API_KEY=your_hub_token
+# Optional: run validators on Guardrails' hosted endpoint instead of downloading
+# models locally (skips the ~2 GB download). Requires the token above.
+GUARDRAILS_USE_REMOTE_INFERENCING=true
+```
+
+On first guard use, the app reads `GUARDRAILS_API_KEY` and writes `~/.guardrailsrc`
+for you — see `_ensure_guardrails_configured()` in `src/core/guardrails.py`. An
+existing `~/.guardrailsrc` is never overwritten.
+
+> The **install** step below still needs the token configured first — run
+> `guardrails configure` once, or make sure `~/.guardrailsrc` exists, before
+> `guardrails hub install`.
+
 ---
 
 ## Step 3 — Install the three validators
