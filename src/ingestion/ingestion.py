@@ -6,7 +6,7 @@
 # #   3.3. Chunk size = x tokens
 # #   3.4. chunk overlap = y tokens   
 # # 4.Create embeddings for the chunks
-# #   4.1. choose the embedding model(gemini-embedding-2-preview or gemini-embedding-001)
+# #   4.1. choose the embedding model (e.g. OpenAI text-embedding-3-small)
 # #   4.2. choose the dimension of the embeddings 
 # #   4.3. create the embeddings for each chunk
 # # 5.Store thw embeddings in a vector database

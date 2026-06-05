@@ -11,7 +11,7 @@ from src.api.v1.schema.query_schema import AIResponse
 from src.api.v1.tools.tools import RAGState, vector_search_node
 from src.core.db import get_sql_database
 
-load_dotenv(override=True)
+load_dotenv()
 
 
 # ── Helper: build the OpenAI LLM ──────────────────────────────────────────────
@@ -24,7 +24,7 @@ def _get_llm() -> ChatOpenAI:
 
 
 # ── Node 0: Router ────────────────────────────────────────────────────────────
-# Uses Gemini (structured output) to classify the user's query.
+# Uses the OpenAI LLM (structured output) to classify the user's query.
 #
 # "product" → query is about products, prices, stock, orders, categories
 #             → routes to nl2sql_node (PostgreSQL / agentic_rag_db)
@@ -62,21 +62,24 @@ def router_node(state: RAGState) -> RAGState:
     chain = prompt | structured_llm
     decision = chain.invoke({"query": state["query"]})
     print(f"[router_node] Route → '{decision.route}' | Reason: {decision.reason}")
-    return {**state, "route": decision.route}
+    return {
+        **state, 
+        "route": decision.route
+    }
 
 
 # ── Node NL2SQL: Translate query to SQL → Execute → Summarise ─────────────────
-# Step 1  create_sql_query_chain generates a safe SELECT statement using the
-#          live DB schema (table/column names + 2 sample rows per table).
-# Step 2  SQLDatabase.run() executes the SQL on the read-only rag_readonly user.
+# Step 1  Build a prompt with the live DB schema (table/column names + 2 sample
+#          rows per table) and ask the LLM to write a single SELECT statement.
+# Step 2  SQLDatabase.run() executes the SQL as the read-only rag_readonly user.
 #          Even if the LLM hallucinated a DML statement, the DB role blocks it.
-# Step 3  Gemini summarises the raw results as a structured AIResponse.
+# Step 3  The LLM summarises the raw results as a structured AIResponse.
 
 def nl2sql_node(state: RAGState) -> RAGState:
     llm = _get_llm()
     db = get_sql_database()
 
-    # ── Step 1: Generate SQL using Gemini + live schema ─────────────────────
+    # ── Step 1: Generate SQL using the LLM + live schema ────────────────────
     schema_info = db.get_table_info()
 
     sql_prompt = ChatPromptTemplate.from_messages([
@@ -111,7 +114,7 @@ def nl2sql_node(state: RAGState) -> RAGState:
         "schema": schema_info,
         "question": state["query"]
     })
-    # Gemini may return content as a list of parts or a plain string
+    # The LLM may return content as a list of parts or a plain string
     content = raw_sql.content
     if isinstance(content, list):
         content = "".join(
@@ -193,7 +196,7 @@ def rerank_node(state: RAGState) -> RAGState:
 
 
 # ── Node 3: Generate Answer ─────────────────────────────────────────────────
-# Formats the top 10 reranked chunks as context and calls Gemini LLM.
+# Formats the top 10 reranked chunks as context and calls the OpenAI LLM.
 # Uses structured output to enforce the AIResponse schema.
 
 def generate_answer_node(state: RAGState) -> RAGState:

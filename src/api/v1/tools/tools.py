@@ -26,7 +26,7 @@ class RAGState(TypedDict):
 
 
 # ── Node 1: Vector Search ──────────────────────────────────────────────────────
-# Uses a bi-encoder (Google Gemini embeddings) to find semantically similar chunks.
+# Uses a bi-encoder (OpenAI embeddings) to find semantically similar chunks.
 # We retrieve k=20 to cast a wide net — the reranker will narrow this down to top 10.
 
 def vector_search_node(state: RAGState) -> RAGState:
