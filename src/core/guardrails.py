@@ -1,26 +1,30 @@
 """
 Guardrails layer for the agentic RAG API.
 
-Demonstrates three validators from the Guardrails AI Hub (https://hub.guardrailsai.com):
+Demonstrates two validators from the Guardrails AI Hub (https://hub.guardrailsai.com):
 
-  1. PII redaction     — DetectPII        applied to the ANSWER  (output guard)
-  2. Toxicity checker   — ToxicLanguage    applied to the QUERY   (input guard)
-  3. Topic restriction  — RestrictToTopic  applied to the QUERY   (input guard)
+  1. PII redaction    — GuardrailsPII   applied to the ANSWER  (output guard)
+  2. Toxicity checker — ToxicLanguage   applied to the QUERY   (input guard)
 
 Install the validators once before running the app:
 
     pip install guardrails-ai
     guardrails configure                                  # paste your hub token
-    guardrails hub install hub://guardrails/detect_pii
+    guardrails hub install hub://guardrails/guardrails_pii
     guardrails hub install hub://guardrails/toxic_language
-    guardrails hub install hub://guardrails/restrict_to_topic
 
-Alternatively, set GUARDRAILS_API_KEY in .env and the app will configure the Hub
-token for you on first use (see _ensure_guardrails_configured below).
+GuardrailsPII runs a local GLiNER model (+ Presidio), so its model is downloaded
+on first use. ToxicLanguage can run locally or on Guardrails' hosted endpoint
+(remote inferencing only skips the model *download*, not the validator install).
+
+Setting GUARDRAILS_API_KEY in .env only configures the Hub *token* on first use
+(see _ensure_guardrails_configured below) — it does NOT install the validators,
+so the `guardrails hub install` commands above are still required.
 
 See references/guardrails-demo-guide.md for the full walkthrough.
 """
 import os
+import re
 import uuid
 from dotenv import load_dotenv
 
@@ -36,7 +40,7 @@ except Exception:  # pragma: no cover - import path varies by version
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-# Presidio entity labels that DetectPII will redact from answers.
+# Presidio entity labels that the PII validator will redact from answers.
 PII_ENTITIES = [
     "EMAIL_ADDRESS",
     "PHONE_NUMBER",
@@ -47,16 +51,14 @@ PII_ENTITIES = [
     "IP_ADDRESS",
 ]
 
-# Topics the assistant is allowed to answer. Anything else is refused.
-ALLOWED_TOPICS = [
-    "human resources",
-    "company policy",
-    "employee benefits",
-    "banking and loans",
-    "products and orders",
-]
-
 TOXICITY_THRESHOLD = float(os.getenv("GUARDRAIL_TOXICITY_THRESHOLD", "0.5"))
+
+# Bare numeric customer/account ids are not a recognized PII entity, so the PII
+# validator leaves them in the answer (an 11-digit id may only get masked when it
+# happens to look like a phone number; shorter ids slip through entirely). We
+# mask them ourselves: any run of 6+ digits → <CUSTOMER_ID>. The 6-digit floor
+# keeps 4-digit years (2026) and short section numbers intact.
+CUSTOMER_ID_RE = re.compile(r"\b\d{6,}\b")
 
 
 class GuardrailViolation(Exception):
@@ -121,44 +123,28 @@ def _build_guards() -> dict:
     _ensure_guardrails_configured()
     try:
         from guardrails import Guard
-        from guardrails.hub import DetectPII, ToxicLanguage, RestrictToTopic
+        from guardrails.hub import GuardrailsPII, ToxicLanguage
     except ImportError as exc:
         raise RuntimeError(
             "Guardrails validators are not installed. Run:\n"
             "  pip install guardrails-ai\n"
             "  guardrails configure\n"
-            "  guardrails hub install hub://guardrails/detect_pii\n"
-            "  guardrails hub install hub://guardrails/toxic_language\n"
-            "  guardrails hub install hub://guardrails/restrict_to_topic"
+            "  guardrails hub install hub://guardrails/guardrails_pii\n"
+            "  guardrails hub install hub://guardrails/toxic_language"
         ) from exc
 
     return {
         # Output guard — rewrite the answer, replacing PII with <ENTITY> tags.
+        # Covers GuardrailsPII's built-in entities only; domain customer ids are
+        # masked separately in guard_output (CUSTOMER_ID_RE).
         "pii": Guard().use(
-            DetectPII(pii_entities=PII_ENTITIES, on_fail="fix")
+            GuardrailsPII(entities=PII_ENTITIES, on_fail="fix")
         ),
         # Input guard — raise if the query is toxic.
         "toxicity": Guard().use(
             ToxicLanguage(
                 threshold=TOXICITY_THRESHOLD,
                 validation_method="sentence",
-                on_fail="exception",
-            )
-        ),
-        # Input guard — raise if the query is off-topic. Use the local
-        # zero-shot classifier only (disable_llm=True → no extra LLM calls).
-        #
-        # zero_shot_threshold is lowered from the 0.5 default to 0.3: with the
-        # validator's "This example has to do with topic {}." hypothesis, real
-        # banking queries score ~0.44–0.51, but extra context (e.g. a customer
-        # id) drags a valid query under 0.5 and gets it wrongly blocked.
-        # Off-topic queries score ≤0.08, so 0.3 sits in the gap — it keeps
-        # legitimate queries while still rejecting genuinely off-topic ones.
-        "topic": Guard().use(
-            RestrictToTopic(
-                valid_topics=ALLOWED_TOPICS,
-                disable_llm=True,
-                zero_shot_threshold=0.3,
                 on_fail="exception",
             )
         ),
@@ -177,7 +163,7 @@ def _get_guards() -> dict:
 def guard_input(query: str) -> None:
     """Run input guardrails on the user's query.
 
-    Raises GuardrailViolation if the query is toxic or off-topic.
+    Raises GuardrailViolation if the query is toxic.
     """
     guards = _get_guards()
 
@@ -189,19 +175,17 @@ def guard_input(query: str) -> None:
             "Your message was flagged as abusive or toxic and cannot be processed.",
         ) from exc
 
-    try:
-        guards["topic"].validate(query)
-    except ValidationError as exc:
-        raise GuardrailViolation(
-            "restrict_to_topic",
-            "I can only help with HR, banking, and product questions.",
-        ) from exc
-
 
 def guard_output(answer: str) -> str:
-    """Redact PII from the model's answer. Returns the cleaned text."""
+    """Redact PII from the model's answer. Returns the cleaned text.
+
+    Two passes: mask domain customer ids ourselves (CUSTOMER_ID_RE — the PII
+    validator has no recognizer for them), then run GuardrailsPII for standard
+    PII (emails, names, formatted phones, ...).
+    """
     if not answer:
         return answer
+    answer = CUSTOMER_ID_RE.sub("<CUSTOMER_ID>", answer)
     guards = _get_guards()
     outcome = guards["pii"].validate(answer)
     return getattr(outcome, "validated_output", None) or answer
