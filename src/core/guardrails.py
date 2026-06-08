@@ -147,10 +147,18 @@ def _build_guards() -> dict:
         ),
         # Input guard — raise if the query is off-topic. Use the local
         # zero-shot classifier only (disable_llm=True → no extra LLM calls).
+        #
+        # zero_shot_threshold is lowered from the 0.5 default to 0.3: with the
+        # validator's "This example has to do with topic {}." hypothesis, real
+        # banking queries score ~0.44–0.51, but extra context (e.g. a customer
+        # id) drags a valid query under 0.5 and gets it wrongly blocked.
+        # Off-topic queries score ≤0.08, so 0.3 sits in the gap — it keeps
+        # legitimate queries while still rejecting genuinely off-topic ones.
         "topic": Guard().use(
             RestrictToTopic(
                 valid_topics=ALLOWED_TOPICS,
                 disable_llm=True,
+                zero_shot_threshold=0.3,
                 on_fail="exception",
             )
         ),
