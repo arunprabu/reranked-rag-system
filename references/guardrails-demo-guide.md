@@ -162,6 +162,14 @@ guardrails hub install hub://guardrails/toxic_language
 > `GuardrailsPII`, `unitary/toxic-bert` for `ToxicLanguage`) download on install/first
 > use — a one-time delay. After that `GuardrailsPII` runs fully offline.
 
+> ⚠️ **These validators are not in `uv.lock`.** They install from Guardrails'
+> token-authenticated index (`pypi.guardrailsai.com`), not public PyPI, so they're
+> deliberately kept out of `pyproject.toml` / `uv.lock` (locking them would mean
+> committing an expiring Hub token as an index credential). The consequence:
+> **`uv sync` removes them** — it prunes anything not in the lock. Re-run the two
+> `guardrails hub install` commands after any `uv sync`, or use `uv sync --inexact`
+> to keep already-installed packages.
+
 ### Verify
 
 ```bash
