@@ -51,14 +51,14 @@ Copy `.env.example` to `.env` and fill in your values:
 cp .env.example .env
 ```
 
-| Variable                  | Purpose                              |
-| ------------------------- | ------------------------------------ |
-| `OPENAI_API_KEY`          | Gemini LLM & embeddings              |
-| `OPENAI_CHAT_MODEL`       | OpenAI model name (e.g. `gpt-5.4`)   |
-| `OPENAI_EMBEDDING_MODEL`  | Embedding model name                 |
-| `COHERE_API_KEY`          | Cohere reranker                      |
-| `SQLALCHEMY_DATABASE_URL` | PGVector store (document embeddings) |
-| `AGENTIC_RAG_DB_URL`      | E-commerce DB for NL2SQL queries     |
+| Variable                 | Purpose                              |
+| ------------------------ | ------------------------------------ |
+| `OPENAI_API_KEY`         | Gemini LLM & embeddings              |
+| `OPENAI_CHAT_MODEL`      | OpenAI model name (e.g. `gpt-5.4`)   |
+| `OPENAI_EMBEDDING_MODEL` | Embedding model name                 |
+| `COHERE_API_KEY`         | Cohere reranker                      |
+| `PG_CONNECTION_STRING`   | PGVector store (document embeddings) |
+| `AGENTIC_RAG_DB_URL`     | E-commerce DB for NL2SQL queries     |
 
 ### 3. Seed the e-commerce database
 
