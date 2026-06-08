@@ -46,15 +46,15 @@ That is perfect for "What does the HR policy say about leave?" but the wrong too
 for "How many orders are still pending?" — that answer lives in a database table,
 not a PDF.
 
-An **agentic** system adds a **decision step**. A *router* inspects the question
+An **agentic** system adds a **decision step**. A _router_ inspects the question
 first and dispatches it to the right tool:
 
-| Question                                        | Route      | Tool                       |
-| ----------------------------------------------- | ---------- | -------------------------- |
-| "What are the 5 most expensive products?"       | `product`  | NL2SQL → PostgreSQL        |
-| "How many orders are in 'shipped' status?"      | `product`  | NL2SQL → PostgreSQL        |
-| "What are the HR helpdesk working hours?"        | `document` | Reranking RAG → PDF chunks |
-| "Explain the refund policy"                      | `document` | Reranking RAG → PDF chunks |
+| Question                                   | Route      | Tool                       |
+| ------------------------------------------ | ---------- | -------------------------- |
+| "What are the 5 most expensive products?"  | `product`  | NL2SQL → PostgreSQL        |
+| "How many orders are in 'shipped' status?" | `product`  | NL2SQL → PostgreSQL        |
+| "What are the HR helpdesk working hours?"  | `document` | Reranking RAG → PDF chunks |
+| "Explain the refund policy"                | `document` | Reranking RAG → PDF chunks |
 
 We model this in **LangGraph** as a graph with **conditional edges** — the path
 through the graph depends on the router's decision.
@@ -163,7 +163,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 COHERE_API_KEY=...
 
 # PGVector store — document embeddings (the RAG/document path)
-SQLALCHEMY_DATABASE_URL=postgresql+psycopg://your_user:your_password@localhost:5432/your_pgvector_db
+PG_CONNECTION_STRING=postgresql+psycopg://your_user:your_password@localhost:5432/your_pgvector_db
 
 # e-commerce DB — the NL2SQL tool (the product path)
 # Credentials match sql/seed.sql — rag_readonly is SELECT-only
@@ -171,8 +171,8 @@ AGENTIC_RAG_DB_URL=postgresql+psycopg://rag_readonly:rag_readonly_pass@localhost
 ```
 
 > **Why a separate `AGENTIC_RAG_DB_URL`?** It points at the e-commerce database
-> *and* authenticates as `rag_readonly`. The document store keeps using
-> `SQLALCHEMY_DATABASE_URL`. Keeping them separate means the NL2SQL agent
+> _and_ authenticates as `rag_readonly`. The document store keeps using
+> `PG_CONNECTION_STRING`. Keeping them separate means the NL2SQL agent
 > physically cannot touch your vector store.
 
 ---
@@ -251,10 +251,10 @@ class RAGState(TypedDict):
 
 The three new fields power the product path:
 
-| Field           | Written by    | Purpose                                |
-| --------------- | ------------- | -------------------------------------- |
-| `route`         | `router_node` | Drives the conditional edge            |
-| `generated_sql` | `nl2sql_node` | Traceability / debugging               |
+| Field           | Written by    | Purpose                                 |
+| --------------- | ------------- | --------------------------------------- |
+| `route`         | `router_node` | Drives the conditional edge             |
+| `generated_sql` | `nl2sql_node` | Traceability / debugging                |
 | `sql_result`    | `nl2sql_node` | Raw DB output before the LLM phrases it |
 
 ---
@@ -374,7 +374,7 @@ practice:
 
 Then strip any stray Markdown fences the model adds:
 
-```python
+````python
     content = raw_sql.content
     if isinstance(content, list):           # some models return a list of parts
         content = "".join(
@@ -385,7 +385,7 @@ Then strip any stray Markdown fences the model adds:
     if generated_sql.lower().startswith("sql"):
         generated_sql = generated_sql[3:].strip()
     print(f"[nl2sql_node] Generated SQL:\n{generated_sql}")
-```
+````
 
 ### 7.2 Execute through the read-only role
 
@@ -577,12 +577,12 @@ SELECT name, price FROM products ORDER BY price DESC LIMIT 5;
 Never trust an LLM to be the only thing standing between a user and your data.
 This system has four independent layers of defence:
 
-| Layer                | Mechanism                                                                         |
-| -------------------- | --------------------------------------------------------------------------------- |
-| 1. Prompt design     | SQL prompt forbids `INSERT/UPDATE/DELETE/DROP` and any DDL/DML                     |
-| 2. Database role     | `rag_readonly` holds **only** `SELECT` — writes fail at the engine                |
-| 3. Session setting   | `default_transaction_read_only = on` — even `BEGIN; DROP TABLE ...` is rejected   |
-| 4. `include_tables`  | `SQLDatabase` exposes only the four business tables; the vector store stays hidden |
+| Layer               | Mechanism                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| 1. Prompt design    | SQL prompt forbids `INSERT/UPDATE/DELETE/DROP` and any DDL/DML                     |
+| 2. Database role    | `rag_readonly` holds **only** `SELECT` — writes fail at the engine                 |
+| 3. Session setting  | `default_transaction_read_only = on` — even `BEGIN; DROP TABLE ...` is rejected    |
+| 4. `include_tables` | `SQLDatabase` exposes only the four business tables; the vector store stays hidden |
 
 Even if a prompt-injection attack slipped a `DROP TABLE products;` past layer 1:
 
@@ -597,27 +597,27 @@ message instead of crashing.
 
 ## 15. Troubleshooting
 
-| Symptom                                          | Fix                                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `AGENTIC_RAG_DB_URL is not set`                  | Add it to `.env`; ensure `load_dotenv()` runs before `get_sql_database()` is called |
-| `role "rag_readonly" does not exist`             | Re-run `psql -U postgres -f sql/seed.sql`                                            |
-| `could not connect to server`                    | PostgreSQL not running, or wrong host/port in `AGENTIC_RAG_DB_URL`                   |
-| Router always picks `document` for DB questions  | Make sure the table names are listed explicitly in the router prompt                |
-| SQL runs but returns nothing                     | Run the query directly in `psql`; check the seed completed without errors           |
-| `ModuleNotFoundError: langchain_community`       | `pip install -e .` again                                                             |
-| LLM wraps SQL in ```` ``` ```` fences            | Already handled by the strip logic in `nl2sql_node`; extend it for new formats      |
+| Symptom                                         | Fix                                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `AGENTIC_RAG_DB_URL is not set`                 | Add it to `.env`; ensure `load_dotenv()` runs before `get_sql_database()` is called |
+| `role "rag_readonly" does not exist`            | Re-run `psql -U postgres -f sql/seed.sql`                                           |
+| `could not connect to server`                   | PostgreSQL not running, or wrong host/port in `AGENTIC_RAG_DB_URL`                  |
+| Router always picks `document` for DB questions | Make sure the table names are listed explicitly in the router prompt                |
+| SQL runs but returns nothing                    | Run the query directly in `psql`; check the seed completed without errors           |
+| `ModuleNotFoundError: langchain_community`      | `pip install -e .` again                                                            |
+| LLM wraps SQL in ` ``` ` fences                 | Already handled by the strip logic in `nl2sql_node`; extend it for new formats      |
 
 ---
 
 ## File Reference
 
-| File                                       | Role                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `sql/seed.sql`                             | Creates `agentic_rag_db`, the `rag_readonly` role, schema, and seed data   |
-| `.env.example`                             | Template for all required environment variables                            |
-| `src/core/db.py`                           | `get_vector_store()` + `get_sql_database()`                                |
-| `src/api/v1/tools/tools.py`                | `RAGState` + `vector_search_node`                                          |
-| `src/api/v1/agents/agents.py`              | `router_node`, `nl2sql_node`, the reranking nodes, and `build_rag_graph()` |
-| `src/api/v1/services/query_service.py`     | Thin wrapper calling `run_search_agent()`                                  |
-| `src/api/v1/routes/query.py`               | FastAPI route handlers                                                     |
-| `src/api/v1/schema/query_schema.py`        | `AIResponse`, `QueryRequest` Pydantic models                              |
+| File                                   | Role                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------- |
+| `sql/seed.sql`                         | Creates `agentic_rag_db`, the `rag_readonly` role, schema, and seed data   |
+| `.env.example`                         | Template for all required environment variables                            |
+| `src/core/db.py`                       | `get_vector_store()` + `get_sql_database()`                                |
+| `src/api/v1/tools/tools.py`            | `RAGState` + `vector_search_node`                                          |
+| `src/api/v1/agents/agents.py`          | `router_node`, `nl2sql_node`, the reranking nodes, and `build_rag_graph()` |
+| `src/api/v1/services/query_service.py` | Thin wrapper calling `run_search_agent()`                                  |
+| `src/api/v1/routes/query.py`           | FastAPI route handlers                                                     |
+| `src/api/v1/schema/query_schema.py`    | `AIResponse`, `QueryRequest` Pydantic models                               |
