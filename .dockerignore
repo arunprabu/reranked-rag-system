@@ -1,0 +1,20 @@
+# Files/folders listed here are NOT sent to Docker or copied into the image.
+# This keeps the build fast and the image small (and keeps secrets OUT).
+# Note: comments must be on their own line (no inline comments allowed).
+
+# 2 GB local virtual environment — the image builds its own
+.venv/
+
+# Version-control history is not needed at runtime
+.git/
+
+# Secrets stay on the host; pass them in at run time with --env-file
+.env
+
+# Python caches and OS junk
+__pycache__/
+*.pyc
+.DS_Store
+
+# Runtime upload folder, starts empty
+uploaded_pdfs/

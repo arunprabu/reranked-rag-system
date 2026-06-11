@@ -1,26 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# A minimal Dockerfile for the Reranking RAG demo.
+#
+# Goal: package this FastAPI app into one image so it runs the same way on any
+# machine — "it works on my laptop" becomes "it works everywhere".
+#
+# Read top to bottom; each numbered step is explained in
+#   references/docker-demo-guide.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 1. Start from a small, official Python image (matches .python-version → 3.13).
 FROM python:3.13-slim
 
+# 2. Everything below runs inside this folder in the container.
 WORKDIR /app
 
-# Install system dependencies required for building some python packages / PostgreSQL clients
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# 3. Install "uv" — a fast tool that downloads and installs Python packages.
+RUN pip install --no-cache-dir uv
 
-# Install uv for faster dependency resolution (optional but good practice)
-RUN pip install uv
-
-# Copy pyproject.toml first to leverage Docker cache
+# 4. Copy ONLY the dependency list first. Docker caches this layer, so when you
+#    change app code (but not dependencies) the slow install step is skipped.
 COPY pyproject.toml .
 
-# Install dependencies directly using pip with pyproject.toml
-RUN uv pip install --system -e .
+# 5. Install every dependency listed in pyproject.toml into the system Python.
+RUN uv pip install --system -r pyproject.toml
 
+# 6. Now copy the rest of the application code into the image.
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# 7. Document that the app listens on this port inside the container.
+EXPOSE 9005
 
-# Command to run the application is specified in compose file, but keep it here as default
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 8. The command that starts the server when the container runs.
+#    --host 0.0.0.0 makes it reachable from outside the container.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9005"]
