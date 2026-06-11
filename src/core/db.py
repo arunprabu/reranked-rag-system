@@ -1,30 +1,27 @@
 import os
 from dotenv import load_dotenv
 from langchain_postgres import PGVector
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.utilities import SQLDatabase
 
-
 load_dotenv(override=True)
-model = os.getenv("GOOGLE_EMBEDDING_MODEL")
-api_key = os.getenv("GOOGLE_API_KEY")
-pg_connection = os.getenv("SQLALCHEMY_DATABASE_URL")
+model = os.getenv("OPENAI_EMBEDDING_MODEL")
+api_key = os.getenv("OPENAI_API_KEY")
+pg_connection = os.getenv("PG_CONNECTION_STRING")
 
 
 def get_embeddings():
-    return GoogleGenerativeAIEmbeddings(
-        model=model,
-        api_key=api_key,
-        output_dimensionality=1536
-    )
+    return OpenAIEmbeddings(model=model, api_key=api_key)
 
 
 def get_vector_store(collection_name: str = "RerankingRAGVectorStore"):
+    if not pg_connection:
+        raise ValueError("PG_CONNECTION_STRING is not set. Check your .env file.")
     return PGVector(
         collection_name=collection_name,
         connection=pg_connection,
         embeddings=get_embeddings(),
-        use_jsonb=True
+        use_jsonb=True,
     )
 
 

@@ -1,11 +1,12 @@
 import os
+import asyncio
 from typing import Literal
 import json
 import cohere
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.runnables.graph import MermaidDrawMethod
+from langchain_openai import ChatOpenAI
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel
 
@@ -16,22 +17,23 @@ from src.core.db import get_sql_database
 load_dotenv(override=True)
 
 
-# ── Helper: build the Gemini LLM ──────────────────────────────────────────────
+# ── Helper: build the OpenAI LLM ──────────────────────────────────────────────
 
-def _get_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model=os.getenv("GOOGLE_LLM_MODEL"),
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+
+def _get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=os.getenv("OPENAI_CHAT_MODEL"), api_key=os.getenv("OPENAI_API_KEY")
     )
 
 
 # ── Node 0: Router ────────────────────────────────────────────────────────────
-# Uses Gemini (structured output) to classify the user's query.
+# Uses (structured output) to classify the user's query.
 #
 # "product" → query is about products, prices, stock, orders, categories
 #             → routes to nl2sql_node (PostgreSQL / agentic_rag_db)
 # "document" → query is about policies, procedures, text documents
 #             → routes to the RAG pipeline (vector_search → rerank → generate_answer)
+
 
 class _RouteDecision(BaseModel):
     route: Literal["product", "document"]
@@ -39,13 +41,20 @@ class _RouteDecision(BaseModel):
 
 
 def router_node(state: RAGState) -> RAGState:
+    # Keyword shortcut: any query mentioning "latest" needs fresh, live data →
+    # route straight to the Tavily MCP web-search node (no LLM call needed).
+    if "latest" in state["query"].lower():
+        print("[router_node] Route → 'web' | Reason: query contains keyword 'latest'")
+        return {**state, "route": "web"}
+
     llm = _get_llm()
     structured_llm = llm.with_structured_output(_RouteDecision)
 
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a query router for an agentic RAG system.
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """You are a query router for an agentic RAG system.
             Classify the user's query into EXACTLY one of two routes:
 
             "product"  — the query asks about products, product prices, stock/inventory,
@@ -56,10 +65,11 @@ def router_node(state: RAGState) -> RAGState:
             "document" — the query asks about policies, procedures, guidelines,
                         regulations, or any topic that requires reading text documents.
 
-            Reply with the route and a one-sentence reason."""
-        ),
-        ("human", "Query: {query}")
-    ])
+            Reply with the route and a one-sentence reason.""",
+            ),
+            ("human", "Query: {query}"),
+        ]
+    )
 
     chain = prompt | structured_llm
     decision = chain.invoke({"query": state["query"]})
@@ -72,7 +82,8 @@ def router_node(state: RAGState) -> RAGState:
 #          live DB schema (table/column names + 2 sample rows per table).
 # Step 2  SQLDatabase.run() executes the SQL on the read-only rag_readonly user.
 #          Even if the LLM hallucinated a DML statement, the DB role blocks it.
-# Step 3  Gemini summarises the raw results as a structured AIResponse.
+# Step 3  LLM summarises the raw results as a structured AIResponse.
+
 
 def nl2sql_node(state: RAGState) -> RAGState:
     llm = _get_llm()
@@ -81,10 +92,11 @@ def nl2sql_node(state: RAGState) -> RAGState:
     # ── Step 1: Generate SQL using Gemini + live schema ─────────────────────
     schema_info = db.get_table_info()
 
-    sql_prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a PostgreSQL expert. Given the database schema below, 
+    sql_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """You are a PostgreSQL expert. Given the database schema below, 
             write a single valid SELECT query that answers the user's question.
 
             Rules:
@@ -103,22 +115,19 @@ def nl2sql_node(state: RAGState) -> RAGState:
             to cast a wider net when the exact term may not match.
 
             Database schema:
-            {schema}"""
-        ),
-        ("human", "Question: {question}")
-    ])
+            {schema}""",
+            ),
+            ("human", "Question: {question}"),
+        ]
+    )
 
     sql_chain = sql_prompt | llm
-    raw_sql = sql_chain.invoke({
-        "schema": schema_info,
-        "question": state["query"]
-    })
+    raw_sql = sql_chain.invoke({"schema": schema_info, "question": state["query"]})
     # Gemini may return content as a list of parts or a plain string
     content = raw_sql.content
     if isinstance(content, list):
         content = "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p)
-            for p in content
+            p.get("text", "") if isinstance(p, dict) else str(p) for p in content
         )
     generated_sql = content.strip().strip("```").strip()
     if generated_sql.lower().startswith("sql"):
@@ -134,28 +143,28 @@ def nl2sql_node(state: RAGState) -> RAGState:
 
     # ── Step 3: Summarise into AIResponse ────────────────────────────────────
     structured_llm = llm.with_structured_output(AIResponse)
-    answer_prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            "You are a helpful data analyst. Answer the user's question using "
-            "the SQL query results below. Be concise and format numbers/lists clearly. "
-            "Set policy_citations to empty string, "
-            "page_no to 'N/A', and document_name to 'agentic_rag_db'."
-        ),
-        (
-            "human",
-            "Question: {query}\n\n"
-            "SQL Used:\n{sql}\n\n"
-            "Query Results:\n{result}"
-        )
-    ])
+    answer_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful data analyst. Answer the user's question using "
+                "the SQL query results below. Be concise and format numbers/lists clearly. "
+                "Set policy_citations to empty string, "
+                "page_no to 'N/A', and document_name to 'agentic_rag_db'.",
+            ),
+            (
+                "human",
+                "Question: {query}\n\n"
+                "SQL Used:\n{sql}\n\n"
+                "Query Results:\n{result}",
+            ),
+        ]
+    )
 
     chain = answer_prompt | structured_llm
-    answer = chain.invoke({
-        "query": state["query"],
-        "sql": generated_sql,
-        "result": sql_result
-    })
+    answer = chain.invoke(
+        {"query": state["query"], "sql": generated_sql, "result": sql_result}
+    )
     print("[nl2sql_node] Answer generated.")
     response = answer.model_dump()
     response["policy_citations"] = "N/A"
@@ -164,7 +173,7 @@ def nl2sql_node(state: RAGState) -> RAGState:
         **state,
         "generated_sql": generated_sql,
         "sql_result": str(sql_result),
-        "response": response
+        "response": response,
     }
 
 
@@ -172,6 +181,7 @@ def nl2sql_node(state: RAGState) -> RAGState:
 # Uses Cohere's cross-encoder reranker.
 # Unlike bi-encoders (which embed query and doc separately),
 # a cross-encoder sees query + doc TOGETHER → more accurate relevance scoring.
+
 
 def rerank_node(state: RAGState) -> RAGState:
     co = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
@@ -181,7 +191,7 @@ def rerank_node(state: RAGState) -> RAGState:
         model="rerank-english-v3.0",
         query=state["query"],
         documents=[doc.page_content for doc in docs],
-        top_n=10
+        top_n=10,
     )
 
     # Map Cohere result indices back to LangChain Document objects
@@ -189,32 +199,52 @@ def rerank_node(state: RAGState) -> RAGState:
 
     print(f"[rerank_node] Top {len(reranked_docs)} chunks after reranking:")
     for i, r in enumerate(rerank_response.results):
-        print(f"  Rank {i+1} | Cohere score: {r.relevance_score:.4f} | original index: {r.index}")
+        print(
+            f"  Rank {i+1} | Cohere score: {r.relevance_score:.4f} | original index: {r.index}"
+        )
 
     return {**state, "reranked_docs": reranked_docs}
 
 
 # ── Node 3: Generate Answer ─────────────────────────────────────────────────
-# Formats the top 3 reranked chunks as context and calls Gemini LLM.
+# Formats the top 10 reranked chunks as context and calls LLM.
 # Uses structured output to enforce the AIResponse schema.
+
 
 def generate_answer_node(state: RAGState) -> RAGState:
     llm = _get_llm()
     structured_llm = llm.with_structured_output(AIResponse)
 
-    context = "\n\n".join([
-        f"[Source: {doc.metadata.get('source', 'unknown')} | Page: {doc.metadata.get('page', -1) + 1 if doc.metadata.get('page') is not None else '?'}]\n{doc.page_content}"
-        for doc in state["reranked_docs"]
-    ])
+    context = "\n\n".join(
+        [
+            f"[Source: {doc.metadata.get('source', 'unknown')} | Page: {doc.metadata.get('page', -1) + 1 if doc.metadata.get('page') is not None else '?'}]\n{doc.page_content}"
+            for doc in state["reranked_docs"]
+        ]
+    )
 
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            "You are a helpful assistant. Answer the user's question using only the "
-            "provided context. Be precise and always cite the source document and page number."
-        ),
-        ("human", "Context:\n{context}\n\nQuestion: {query}")
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful assistant. Answer the user's question using only the "
+                "provided context.\n\n"
+                "IMPORTANT: The context may contain chunks from MULTIPLE versions of the same "
+                "document (e.g. a 2025 edition and a 2026 edition). When the answer differs "
+                "across versions, do NOT pick only one. Instead:\n"
+                "  - Lead with the most recent / current version's answer (highest year).\n"
+                "  - Then explicitly note how earlier versions differed "
+                "(e.g. 'As of the 2026 policy ...; previously, under the 2025 policy ...').\n"
+                "  - If all versions agree, just give the single answer.\n\n"
+                "Citation rules (fill the structured fields):\n"
+                "  - document_name: comma-separated list of EVERY source document you used.\n"
+                "  - page_no: comma-separated page numbers, aligned with the documents above.\n"
+                "  - policy_citations: a readable citation combining each document and its page "
+                "(e.g. 'HR_Knowledge_Base_2026.pdf, Page 1; HR_Knowledge_Base_2025.pdf, Page 1').\n"
+                "Always cite ALL versions you drew the answer from, not just one.",
+            ),
+            ("human", "Context:\n{context}\n\nQuestion: {query}"),
+        ]
+    )
 
     chain = prompt | structured_llm
     result = chain.invoke({"context": context, "query": state["query"]})
@@ -223,11 +253,58 @@ def generate_answer_node(state: RAGState) -> RAGState:
     return {**state, "response": result.model_dump()}
 
 
+# ── Node WEB: Tavily MCP web search ─────────────────────────────────────────
+# Triggered by router_node when the query contains the keyword "latest".
+# Connects to Tavily's hosted MCP server over streamable HTTP, calls its
+# tavily_search tool for live results, then summarises into the AIResponse schema.
+
+
+async def _tavily_mcp_search(query: str) -> str:
+    client = MultiServerMCPClient(
+        {
+            "tavily": {
+                "transport": "streamable_http",
+                "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={os.getenv('TAVILY_API_KEY')}",
+            }
+        }
+    )
+    tools = await client.get_tools()
+    search_tool = next((t for t in tools if "search" in t.name.lower()), tools[0])
+    return str(await search_tool.ainvoke({"query": query}))
+
+
+def web_search_node(state: RAGState) -> RAGState:
+    print("[web_search_node] Querying Tavily MCP server...")
+    search_results = asyncio.run(_tavily_mcp_search(state["query"]))
+
+    llm = _get_llm()
+    structured_llm = llm.with_structured_output(AIResponse)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful assistant. Answer the user's question using the live "
+                "web search results below. Be concise and cite the most relevant sources. "
+                "Set policy_citations to the source URLs, page_no to 'N/A', and "
+                "document_name to 'tavily_web_search'.",
+            ),
+            ("human", "Question: {query}\n\nWeb search results:\n{results}"),
+        ]
+    )
+
+    chain = prompt | structured_llm
+    answer = chain.invoke({"query": state["query"], "results": search_results})
+    print("[web_search_node] Answer generated.")
+    return {**state, "response": answer.model_dump()}
+
+
 # ── Build the LangGraph ────────────────────────────────────────────────────────
-# The graph now has two paths selected by the router:
+# The graph now has three paths selected by the router:
 #
 #   router ──► "product"  ──► nl2sql_node ──► END
-#          └─► "document" ──► vector_search ──► rerank ──► generate_answer ──► END
+#          ├─► "document" ──► vector_search ──► rerank ──► generate_answer ──► END
+#          └─► "web"      ──► web_search_node (Tavily MCP) ──► END
+
 
 def build_rag_graph():
     graph = StateGraph(RAGState)
@@ -237,20 +314,24 @@ def build_rag_graph():
     graph.add_node("vector_search", vector_search_node)
     graph.add_node("rerank", rerank_node)
     graph.add_node("generate_answer", generate_answer_node)
+    graph.add_node("web_search", web_search_node)
 
     graph.set_entry_point("router")
 
-    # Conditional routing: "product" → nl2sql, "document" → vector_search
+    # Conditional routing: "product" → nl2sql, "document" → vector_search,
+    # "web" → web_search (Tavily MCP, for "latest" queries)
     graph.add_conditional_edges(
         "router",
         lambda state: state["route"],
         {
             "product": "nl2sql",
             "document": "vector_search",
-        }
+            "web": "web_search",
+        },
     )
 
     graph.add_edge("nl2sql", END)
+    graph.add_edge("web_search", END)
 
     graph.add_edge("vector_search", "rerank")
     graph.add_edge("rerank", "generate_answer")
@@ -264,10 +345,8 @@ def build_rag_graph():
     return compiled_agent
 
 
-
 # Compile once at module load — reused across all requests
 rag_graph = build_rag_graph()
-
 
 
 # ── Public entrypoint (called by query_service.py) ─────────────────────────
@@ -285,7 +364,6 @@ def run_search_agent(query: str) -> dict:
     return final_state["response"]
 
 
-
 async def run_search_agent_stream(query: str):
     initial_state: RAGState = {
         "query": query,
@@ -298,12 +376,12 @@ async def run_search_agent_stream(query: str):
     }
     async for event in rag_graph.astream_events(initial_state, version="v1"):
         kind = event["event"]
-        
+
         # If it's a token generated by the chat model
         if kind == "on_chat_model_stream":
             content = event["data"]["chunk"].content
             if content:
                 # Format as an SSE data stream payload
                 yield f"data: {json.dumps({'token': content})}\n\n"
-                
+
     yield "data: [DONE]\n\n"

@@ -166,8 +166,8 @@ You will often see the #1 vector similarity result NOT be the #1 reranker result
 ```python
 def generate_answer_node(state: RAGState) -> RAGState:
     llm = ChatGoogleGenerativeAI(
-        model=os.getenv("GOOGLE_LLM_MODEL"),
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+        model=os.getenv("OPENAI_CHAT_MODEL"),
+        google_api_key=os.getenv("OPENAI_API_KEY")
     )
     structured_llm = llm.with_structured_output(AIResponse)
 
@@ -215,13 +215,13 @@ def build_rag_graph():
 
 From `.env.example`:
 
-| Variable                  | Used In              | Purpose                                 |
-| ------------------------- | -------------------- | --------------------------------------- |
-| `GOOGLE_API_KEY`          | `db.py`, `agents.py` | Gemini embeddings + LLM                 |
-| `GOOGLE_EMBEDDING_MODEL`  | `db.py`              | e.g. `gemini-embedding-2-preview`       |
-| `GOOGLE_LLM_MODEL`        | `agents.py`          | e.g. `gemini-2.0-flash`                 |
-| `COHERE_API_KEY`          | `agents.py`          | Cohere Rerank API                       |
-| `SQLALCHEMY_DATABASE_URL` | `db.py`              | PostgreSQL + pgvector connection string |
+| Variable                 | Used In              | Purpose                                 |
+| ------------------------ | -------------------- | --------------------------------------- |
+| `GOOGLE_API_KEY`         | `db.py`, `agents.py` | Gemini embeddings + LLM                 |
+| `OPENAI_EMBEDDING_MODEL` | `db.py`              | e.g. `gemini-embedding-2-preview`       |
+| `OPENAI_CHAT_MODEL`      | `agents.py`          | e.g. `gemini-2.0-flash`                 |
+| `COHERE_API_KEY`         | `agents.py`          | Cohere Rerank API                       |
+| `PG_CONNECTION_STRING`   | `db.py`              | PostgreSQL + pgvector connection string |
 
 ---
 

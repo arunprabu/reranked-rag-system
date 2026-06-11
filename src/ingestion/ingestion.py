@@ -4,10 +4,10 @@
 # #   3.1. We can use a simple split method like splitting
 # #   3.2. Follow proper chunking stradegy
 # #   3.3. Chunk size = x tokens
-# #   3.4. chunk overlap = y tokens   
+# #   3.4. chunk overlap = y tokens
 # # 4.Create embeddings for the chunks
 # #   4.1. choose the embedding model(gemini-embedding-2-preview or gemini-embedding-001)
-# #   4.2. choose the dimension of the embeddings 
+# #   4.2. choose the dimension of the embeddings
 # #   4.3. create the embeddings for each chunk
 # # 5.Store thw embeddings in a vector database
 # #   5.1. our preferred vector db is pgvector
@@ -17,15 +17,18 @@
 
 import os
 from dotenv import load_dotenv
-from langchain_community.document_loaders import TextLoader,UnstructuredWordDocumentLoader,PyPDFLoader
+from langchain_community.document_loaders import (
+    TextLoader,
+    UnstructuredWordDocumentLoader,
+    PyPDFLoader,
+)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from src.core.db import get_vector_store
 from sqlalchemy import create_engine, text
 
-
 load_dotenv(override=True)
-PG_CONNECTION = os.getenv("SQLALCHEMY_DATABASE_URL")
+PG_CONNECTION = os.getenv("PG_CONNECTION_STRING")
+
 
 def load_document(file_path):
     ext = os.path.splitext(file_path)[-1].lower()
@@ -37,51 +40,52 @@ def load_document(file_path):
         loader = UnstructuredWordDocumentLoader(file_path)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
-    return loader.load(),ext
+    return loader.load(), ext
+
 
 def index_add():
-    engine = create_engine(os.getenv("SQLALCHEMY_DATABASE_URL"))
+    engine = create_engine(os.getenv("PG_CONNECTION_STRING"))
     with engine.connect() as conn:
-        conn.execute(text("ALTER TABLE langchain_pg_embedding ALTER COLUMN embedding TYPE vector(1536)"))
-        conn.execute(text("CREATE INDEX ON langchain_pg_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"))
+        conn.execute(
+            text(
+                "ALTER TABLE langchain_pg_embedding ALTER COLUMN embedding TYPE vector(1536)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX ON langchain_pg_embedding USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+            )
+        )
         conn.commit()
 
+
 def ingest_pdf(file_path):
-    docs,ext = load_document(file_path)
-    print("Pages: " +  str(len(docs)))
+    docs, ext = load_document(file_path)
+    print("Pages: " + str(len(docs)))
 
     for doc in docs:
-        doc.metadata.update({
-            "source": file_path,
-            "document_name": os.path.basename(file_path),
-            "document_extension": ext,
-            "page": doc.metadata.get("page",None),
-            "category": "hr_support_desk",
-            "last_updated":os.path.getmtime(file_path)
-        })
-    print("Sample Document: "+str(docs[0]))
+        doc.metadata.update(
+            {
+                "source": file_path,
+                "document_name": os.path.basename(file_path),
+                "document_extension": ext,
+                "page": doc.metadata.get("page", None),
+                "category": "hr_support_desk",
+                "last_updated": os.path.getmtime(file_path),
+            }
+        )
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size = 500,
-        chunk_overlap = 100
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
     chunks = splitter.split_documents(docs)
-    print("Chunks: "+str(len(chunks)))
+    print("Chunks: " + str(len(chunks)))
 
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model = os.getenv("GOOGLE_EMBEDDING_MODEL"),
-        api_key = os.getenv("GOOGLE_API_KEY")
-    )
-
-    # embeddings = OpenAIEmbeddings(
-    #     model = os.getenv("OPENAI_EMBEDDING_MODEL"),
-    #     api_key = os.getenv("OPENAI_API_KEY")
-    # )
     vector_store = get_vector_store("RerankingRAGVectorStore")
     vector_store.add_documents(chunks)
     index_add()
     print("==== Ingestion completed ====")
 
-# ingest_pdf("data/HR_Knowledge_Base_2025.pdf")
-# ingest_pdf("data/HR_Knowledge_Base_2026.pdf")
+
+if __name__ == "__main__":
+    # ingest_pdf("data/HR_Knowledge_Base_2025.pdf")
+    ingest_pdf("data/HR_Knowledge_Base_2026.pdf")
